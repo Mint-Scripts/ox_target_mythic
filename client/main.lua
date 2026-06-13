@@ -9,6 +9,8 @@ local options = require 'client.api'.getTargetOptions()
 require 'client.debug'
 require 'client.defaults'
 require 'client.compat.qtarget'
+require 'client.compat.mythic-targeting'
+require 'client.compat.mythic-menus'
 
 local SendNuiMessage = SendNuiMessage
 local GetEntityCoords = GetEntityCoords
