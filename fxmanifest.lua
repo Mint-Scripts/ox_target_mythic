@@ -40,6 +40,9 @@ files {
     'client/framework/esx.lua',
     'client/framework/qbx.lua',
     'client/compat/qtarget.lua',
+    'client/framework/mythic.lua',
+    'client/compat/mythic-targeting.lua',
+	'client/compat/mythic-menus.lua',
 }
 
 provide 'qtarget'
