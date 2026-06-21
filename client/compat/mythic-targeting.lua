@@ -1,13 +1,4 @@
--- ox_target <-> mythic-targeting compatibility layer
---
--- Re-implements the public API of mythic-targeting on top of ox_target so that
--- existing Mythic scripts keep working without modification:
---   * exports["ox_target"]:GetEntityPlayerIsLookingAt()
---   * exports["ox_target"]:AddObject / AddEntity / AddPed / AddGlobalPed / AddPedModel / Remove*
---   * exports["ox_target"]:ZonesAddBox / ZonesAddCircle / ZonesAddPoly / ZonesRemoveZone / ...
---   * exports["mythic-base"]:FetchComponent("Targeting"):GetEntityPlayerIsLookingAt() (and the above as methods)
-
--- You can also just use mythic's component as a drag and drop but i recommend you use ox's
+-- This file is purely additive: it does not touch ox_target's targeting loop.
 
 local api = require 'client.api'
 
@@ -67,7 +58,7 @@ local Jobs, Inventory, Reputation
 local function getBaseResource()
     if mythicBase and GetResourceState(mythicBase) == 'started' then return mythicBase end
 
-    for _, name in ipairs({ 'mythic-base' }) do
+    for _, name in ipairs({ 'mythic-base', 'prp-base' }) do
         if GetResourceState(name) == 'started' then
             mythicBase = name
             return name
@@ -227,10 +218,13 @@ local function translate(menuArray, fallbackIcon, kind, zoneName, defaultDistanc
     for i = 1, #menuArray do
         local mItem = menuArray[i]
 
+        -- Mythic resources are inconsistent about the label field: the ported
+        -- VehicleMenu/PlayerMenu use `text`, but most external resources
+        -- (mythic-dealerships, etc.) use `label`. Accept either.
         local option = {
             name = mItem.name or nextName(),
             icon = normalizeIcon(mItem.icon, fallbackIcon),
-            label = mItem.text or '',
+            label = mItem.text or mItem.label or '',
             distance = mItem.minDist or mItem.distance or defaultDistance or 7,
         }
 
@@ -285,6 +279,18 @@ local function translate(menuArray, fallbackIcon, kind, zoneName, defaultDistanc
                 pcall(mItem.onSelect, entityData, mItem.data)
             end
         end
+
+        -- These closures are raw Lua functions created inside ox_target itself,
+        -- but they get registered under the *invoking* Mythic resource's name, so
+        -- addTarget() skips its `resource == 'ox_target'` sanitisation. ox_target
+        -- json.encode()s the whole option list to the NUI when a target is shown,
+        -- and raw functions blow up with "type 'function' is not supported by JSON".
+        -- Round-trip them through msgpack (same as upstream does for its own
+        -- options) so they become funcref proxies: still callable in Lua, but
+        -- serialisable. canInteract/onSelect are the only function fields on the
+        -- option that reach the NUI payload.
+        option.canInteract = msgpack.unpack(msgpack.pack(option.canInteract))
+        option.onSelect = msgpack.unpack(msgpack.pack(option.onSelect))
 
         result[#result + 1] = option
     end
@@ -348,7 +354,7 @@ end
 local function ZonesAddBox(zoneId, icon, center, length, width, options, menuArray, proximity, enabled)
     if not zoneId then return end
 
-    api.removeZone(zoneId, true) -- anti dupe (e.g. resource restart re-registering)
+    api.removeZone(zoneId, true) -- de-dupe (e.g. resource restart re-registering)
     zoneEnabled[zoneId] = enabled ~= false
 
     options = options or {}
@@ -430,8 +436,7 @@ local function ZonesIsCoordInZone(zoneId, coords)
 end
 
 local function ZonesRefresh()
-    -- This is just here to stop server panic.
-    -- ox_target manages zones live; nothing to put here.
+    -- ox_target manages zones live; nothing to rebuild.
 end
 
 exports('GetEntityPlayerIsLookingAt', getEntityPlayerIsLookingAt)
@@ -453,8 +458,6 @@ exports('ZonesToggle', ZonesToggle)
 exports('ZonesIsEnabled', ZonesIsEnabled)
 exports('ZonesIsCoordInZone', ZonesIsCoordInZone)
 exports('ZonesRefresh', ZonesRefresh)
-
---#region mythic-base "Targeting" component shim
 
 -- Methods are called with `:` (Targeting:Method()), so they receive `self` first.
 local TARGETING = {
